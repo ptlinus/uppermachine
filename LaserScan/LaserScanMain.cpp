@@ -3,6 +3,7 @@
 
 #include "stdafx.h"
 #include<winsock.h>
+#include <windows.h>
 #include <conio.h>
 #include <process.h> /* _beginthread, _endthread */
 #include <iostream>
@@ -33,6 +34,99 @@ DWORD m_dwCommEvents;
 std::queue<struct pointStruct>m_scanBuff;
 
 //#define OFFLINE
+
+
+struct wareHouseParam
+{
+	int heightCylinder;
+	int diameterCylinder;
+
+	int heightCone;
+	int diameterOutlet;
+	int unit;
+};
+
+struct commParam
+{
+	int port;
+	int baud;
+};
+
+struct detectParam
+{
+	int HAngleResolution;
+};
+struct wareHouseParam m_wareHouseParam;
+struct commParam m_commParam;
+struct detectParam m_detectParam;
+
+bool m_ackOk_arduino_pc = 0;
+//int m_switch_on_arduino_pc = 0;
+void initPhase();
+bool loadConfig();
+
+
+void initPhase()
+{
+	m_wareHouseParam.heightCylinder = 0;
+	m_wareHouseParam.diameterCylinder = 0;
+	m_wareHouseParam.heightCone = 0;
+	m_wareHouseParam.diameterOutlet = 0;
+	m_wareHouseParam.unit = 0;
+
+	m_commParam.port = 8;
+	m_commParam.baud = 115200;
+
+	m_detectParam.HAngleResolution = 600;
+	loadConfig();
+
+
+	m_HAngleResolution = m_detectParam.HAngleResolution;
+}
+bool loadConfig()
+{
+	TCHAR charPath[MAX_PATH] = { 0 };
+	::GetModuleFileName(NULL, charPath, MAX_PATH);
+	// 设置ini路径到exe同一目录下
+	//_tcsrchr() 反向搜索获得最后一个'\\'的位置，并返回该位置的指针  
+	TCHAR *pFind = _tcsrchr(charPath, '\\');
+	if (pFind != NULL)
+	{
+		*pFind = '\0';
+	}
+
+	std::string strPath = charPath;
+
+
+	char ip[16];
+	char add[20];
+	char net[20];
+	char set[20];
+
+
+	strPath += "\\CONFIG.ini";
+	char str[20];
+	::GetPrivateProfileString("WAREHOUSEPARAM", "heightCylinder", "0", str, 20, strPath.c_str());
+	m_wareHouseParam.heightCylinder = _ttoi(str);
+	::GetPrivateProfileString("WAREHOUSEPARAM", "diameterCylinder", "0", str, 20, strPath.c_str());
+	m_wareHouseParam.diameterCylinder = _ttoi(str);
+	::GetPrivateProfileString("WAREHOUSEPARAM", "heightCone", "0", str, 20, strPath.c_str());
+	m_wareHouseParam.heightCone = _ttoi(str);
+	::GetPrivateProfileString("WAREHOUSEPARAM", "diameterOutlet", "0", str, 20, strPath.c_str());
+	m_wareHouseParam.diameterOutlet = _ttoi(str);
+	::GetPrivateProfileString("WAREHOUSEPARAM", "unit", "0", str, 20, strPath.c_str());
+	m_wareHouseParam.unit = _ttoi(str);
+	
+	::GetPrivateProfileString("COMMPARAM", "port", "1", str, 20, strPath.c_str());
+	m_commParam.port = _ttoi(str);
+	::GetPrivateProfileString("COMMPARAM", "baud", "1", str, 20, strPath.c_str());
+	m_commParam.baud = _ttoi(str);
+
+	::GetPrivateProfileString("DETECTPARAM", "HAngleResolution", "2", str, 20, strPath.c_str());
+	m_detectParam.HAngleResolution = _ttoi(str);
+	return false;
+}
+
 
 //打开串口
 bool openport(char *portname)
@@ -219,6 +313,124 @@ unsigned char serialBuf_start[STARTSIZE] = { 11, 22, 55 };  //起始标志
 unsigned char serialBuf_data[MAX_BUFF];
 int serial_data_indx = 0;
 HANDLE hMutex1;
+HANDLE hMutex2_arduinoPC;
+HANDLE hMutex3_arduinoPC;
+//int m_switch_on_ack = 0;
+
+
+
+
+void ThreadFuncSerialSendAckInterface(PVOID param)
+{
+	int switch_on_ack = 0;
+	unsigned char pariXOR = 0;
+	char sendBuf[50];
+	int HAngleResolution = 500;
+	int len = 0;
+	while (true)
+	{
+		WaitForSingleObject(hMutex3, INFINITE);
+		int flagSave = saveImage_flag;
+		ReleaseMutex(hMutex3);
+
+		if (1 == flagSave)
+		{
+			WaitForSingleObject(hMutex3, INFINITE);
+			saveImage_flag = 0;
+			ReleaseMutex(hMutex3);
+			//WaitForSingleObject(hMutex3_arduinoPC, INFINITE);
+			switch_on_ack = 1;
+			//ReleaseMutex(hMutex3_arduinoPC);
+
+			printf("start\n");
+
+
+		}
+		if (2 == flagSave)
+		{
+			WaitForSingleObject(hMutex3, INFINITE);
+			saveImage_flag = 0;
+			ReleaseMutex(hMutex3);
+			//WaitForSingleObject(hMutex3_arduinoPC, INFINITE);
+			switch_on_ack = 0;
+			//ReleaseMutex(hMutex3_arduinoPC);
+
+			printf("stop\n");
+
+		}
+		//WaitForSingleObject(hMutex5, INFINITE);
+		//bool sendPwmFlag = set_pwm;
+		//ReleaseMutex(hMutex5);
+		//if (sendPwmFlag)
+		//{
+		//	WaitForSingleObject(hMutex5, INFINITE);
+		//	set_pwm = 0;
+		//	HAngleResolution = m_HAngleResolution;
+		//	ReleaseMutex(hMutex5);
+
+		//	//WaitForSingleObject(hMutex3_arduinoPC, INFINITE);
+		//	switch_on_ack = 2;
+		//	//ReleaseMutex(hMutex3_arduinoPC);
+		//}
+	/*	WaitForSingleObject(hMutex3_arduinoPC, INFINITE);
+		switch_on_ack = m_switch_on_ack;
+		ReleaseMutex(hMutex3_arduinoPC);*/
+		switch (switch_on_ack)
+		{
+		case 0:		//发送停止信号
+			sprintf(sendBuf, "55 13 0 2 2 77 ");
+			len = (strlen(sendBuf));
+			WriteChar(sendBuf, len);
+			Sleep(2000);
+			WaitForSingleObject(hMutex2_arduinoPC, INFINITE);
+			if (m_ackOk_arduino_pc)
+			{
+				m_ackOk_arduino_pc = 0;
+				switch_on_ack = 4;
+			}
+			ReleaseMutex(hMutex2_arduinoPC);
+
+			break;
+		case 1:    //发送启动信号
+			sprintf(sendBuf, "55 12 0 1 1 77 ");
+			 len = (strlen(sendBuf));
+			WriteChar(sendBuf, len);
+			Sleep(2000);
+			WaitForSingleObject(hMutex2_arduinoPC, INFINITE);
+			if (m_ackOk_arduino_pc)
+			{
+				m_ackOk_arduino_pc = 0;
+				switch_on_ack = 2;
+			}
+			ReleaseMutex(hMutex2_arduinoPC);
+			break;
+		case 2:    //发送横向角分辨率
+			pariXOR ^= m_detectParam.HAngleResolution / 256;
+			pariXOR ^= m_detectParam.HAngleResolution % 256;
+
+			sprintf(sendBuf, "55 16 %d %d %d 77 ", m_detectParam.HAngleResolution / 256, m_detectParam.HAngleResolution % 256, pariXOR);
+			len = (strlen(sendBuf));
+			WriteChar(sendBuf, len);
+			Sleep(2000);
+			WaitForSingleObject(hMutex2_arduinoPC, INFINITE);
+			if (m_ackOk_arduino_pc)
+			{
+				m_ackOk_arduino_pc = 0;
+				switch_on_ack = 4;
+			}
+			ReleaseMutex(hMutex2_arduinoPC);
+			break;
+		case 4:   //判断应答信号
+			break;
+		default:
+			break;
+		}
+
+	}
+}
+
+
+
 void ThreadFuncSerial(PVOID param)
 {
 #ifdef OFFLINE
@@ -231,14 +443,15 @@ void ThreadFuncSerial(PVOID param)
 	char RXBuff;                                                       //接收到的数据
 	DWORD dwLength;
 
-
-	if (openport("COM8"))                                                          //打开串口
+	char strBuf[20];
+	sprintf(strBuf, "COM%d", m_commParam.port);
+	if (openport(strBuf))                                                          //打开串口
 	{
 		printf("open comport success\n");
 	}
 	else
 		return;
-	if (setupdcb(115200))                                                            //设置波特率为9600，其他采用默认值
+	if (setupdcb(m_commParam.baud))                                                            //设置波特率为9600，其他采用默认值
 		printf("setup DCB success\n");
 	else
 		return;
@@ -248,10 +461,11 @@ void ThreadFuncSerial(PVOID param)
 		return;
 	PurgeComm(hComm, PURGE_RXCLEAR | PURGE_TXCLEAR | PURGE_RXABORT | PURGE_TXABORT);     //清空缓冲区
 
-	WriteChar("55 2 77 ", 8);
-	WriteChar("55 2 77 ", 8);
-	WriteChar("55 2 77 ", 8);
-	WriteChar("55 2 77 ", 8);
+
+	unsigned char dataMarkBitIdx = 0;
+	
+
+
 	while (1)
 	{
 		bResult = ClearCommError(hComm, &dwError, &comstat);
@@ -262,14 +476,12 @@ void ThreadFuncSerial(PVOID param)
 		
 		if (dwLength > 0)
 			ReadFile(hComm, m_InPutBuff, dwLength, &BytesRead, &m_ov);
-		static int switch_on = 0;
 		static int lenIndex = 0;
 		bool flagEnd = 0;
 		static bool flagS = 1;
-
+		static int switch_on = 0;
 		static int trueNum = 0;
 		static int errorNum = 0;
-
 		static unsigned char len = 0;
 		int indX = 0;
 		static unsigned char verifyBit = 0;
@@ -321,25 +533,45 @@ void ThreadFuncSerial(PVOID param)
 				}
 			}
 			break;
-			case 1:  //数据长度len
-			{
+			case 1:  //数据标识位
+				//12->应答信号    arduino--->PC
+				//13->点云数据    arduino--->PC
+				if (m_InPutBuff[i] / 10 == 1)
+				{
+					unsigned char LowBit = m_InPutBuff[i] % 10;
+					if (1 < LowBit && LowBit < 9)
+					{
+						dataMarkBitIdx = LowBit;
+						switch_on = 2;
+					}
+					else
+					{
+						switch_on = 0; //状态转移
+					}
+				}
+				else
+				{
+					switch_on = 0; //状态转移
+				}
+				break;
+			case 2:  //数据长度len
 				len = m_InPutBuff[i];
 				//	indX = i + 1;
 				serial_data_indx = 0;
 				verifyBit = 0;
 
-				switch_on = 2;  //状态转移
-			}
-			break;
-			case 2:  //读取len个数据
+				switch_on = 3;  //状态转移
+				break;
+			case 3:  //读取len个数据
 				serialBuf_data[serial_data_indx++] = m_InPutBuff[i];
 				verifyBit ^= m_InPutBuff[i];
 				if (serial_data_indx == len)
 				{
-					switch_on = 3; //状态转移
+					switch_on = 4; //状态转移
 				}
+				
 				break;
-			case 3: //读取校验码
+			case 4: //读取校验码
 				if (verifyBit != m_InPutBuff[i])
 				{
 					//校验出错----丢弃数据包
@@ -348,35 +580,50 @@ void ThreadFuncSerial(PVOID param)
 				}
 				else
 				{
-					switch_on = 4; //状态转移
+					switch_on = 5; //状态转移
 				}
 				break;
-			case 4: //结束标志位
+			case 5: //结束标志位
 				if (0xB2 != m_InPutBuff[i])
 				{
 					//出错----丢弃数据包
-					switch_on = 0; //状态转移
-				}
-				else{
-					for (int i = 0; i < len; i+=6)
+					if (dataMarkBitIdx == 2)
 					{
-						struct pointStruct pt;
-						pt.theta_h = serialBuf_data[i] * 256 + serialBuf_data[i + 1];
-						pt.theta_v = serialBuf_data[i+2] * 256 + serialBuf_data[i + 3];
-						pt.len = serialBuf_data[i + 4] * 256 + serialBuf_data[i + 5];
-						WaitForSingleObject(hMutex1, INFINITE);
-						m_scanBuff.push(pt);
-						ReleaseMutex(hMutex1);
+						WaitForSingleObject(hMutex2_arduinoPC, INFINITE);
+						m_ackOk_arduino_pc = 0;
+						ReleaseMutex(hMutex2_arduinoPC);
+					}
+				}
+				else
+				{
+					if (dataMarkBitIdx == 3)
+					{
+						for (int i = 0; i < len; i += 6)
+						{
+							struct pointStruct pt;
+							pt.theta_h = serialBuf_data[i] * 256 + serialBuf_data[i + 1];
+							pt.theta_v = serialBuf_data[i + 2] * 256 + serialBuf_data[i + 3];
+							pt.len = serialBuf_data[i + 4] * 256 + serialBuf_data[i + 5];
+							WaitForSingleObject(hMutex1, INFINITE);
+							m_scanBuff.push(pt);
+							ReleaseMutex(hMutex1);
+						}
 					}
 					//printf("\n成功接收数据包——>%d(%d)\n", (trueNum++)*8, errorNum);
-
-					switch_on = 0; //状态转移
+					else if (dataMarkBitIdx == 2)
+					{
+						WaitForSingleObject(hMutex2_arduinoPC, INFINITE);
+						m_ackOk_arduino_pc = 1;
+						ReleaseMutex(hMutex2_arduinoPC);
+					}
+				
 				}
-
+				switch_on = 0; //状态转移
 			default:
+				switch_on = 0; //状态转移
 				break;
 			}
-
+			printf("switch_on: %d\n", switch_on);
 		}
 		memset(m_InPutBuff, 0, MAX_BUFF);
 		::Sleep(2);
@@ -553,62 +800,6 @@ void ThreadFuncShowCloud(PVOID param)
 			WaitForSingleObject(hMutex1, INFINITE);
 			flag = m_scanBuff.empty();
 			ReleaseMutex(hMutex1);
-		}
-		WaitForSingleObject(hMutex3, INFINITE);
-		int flagSave = saveImage_flag;
-		ReleaseMutex(hMutex3);
-
-		if (1 == flagSave)
-		{
-			WaitForSingleObject(hMutex3, INFINITE);
-			saveImage_flag = 0;
-			ReleaseMutex(hMutex3);
-			char sendBuf[25];
-			sprintf(sendBuf, "55 1 77 ");
-			int len = (strlen(sendBuf));
-			WriteChar(sendBuf, len);
-			WriteChar(sendBuf, len);
-			WriteChar(sendBuf, len);
-			::Sleep(10);
-			
-			printf("start\n");
-
-			
-		}
-		if (2 == flagSave)
-		{
-			WaitForSingleObject(hMutex3, INFINITE);
-			saveImage_flag = 0;
-			ReleaseMutex(hMutex3);
-			char sendBuf[25];
-			sprintf(sendBuf, "55 2 77 ");
-			int len = (strlen(sendBuf));
-			WriteChar(sendBuf, len);
-			WriteChar(sendBuf, len);
-			WriteChar(sendBuf, len);
-			::Sleep(10);
-
-			printf("stop\n");
-
-		}
-		WaitForSingleObject(hMutex5, INFINITE);
-		bool sendPwmFlag = set_pwm;
-		ReleaseMutex(hMutex5);
-		if (sendPwmFlag)
-		{
-			WaitForSingleObject(hMutex5, INFINITE);
-			set_pwm = 0;
-			int datHPwm = hpwm_value;
-			int datVPwm = vpwm_value;
-			ReleaseMutex(hMutex5);
-
-			char sendBuf[25];
-			sprintf(sendBuf, "55 %d %d 77 ", datHPwm/10, datVPwm/10);
-			int len = (strlen(sendBuf));
-			WriteChar(sendBuf, len);
-			WriteChar(sendBuf, len);
-			WriteChar(sendBuf, len);
-			::Sleep(10);
 		}
 	
 		::Sleep(5);
@@ -805,6 +996,7 @@ void ThreadFuncUserInterface(PVOID param)
 				switch_on = 0; //状态转移
 				break;
 			default:
+				switch_on = 0; //状态转移
 				break;
 			}
 
@@ -813,14 +1005,21 @@ void ThreadFuncUserInterface(PVOID param)
 	closesocket(sockListener);
 	WSACleanup();
 }
+
+
 int main(int argc, char* argv[])
 {
+	initPhase();
 	hMutex1 = CreateMutex(NULL, FALSE, NULL);
-
+	hMutex2_arduinoPC = CreateMutex(NULL, FALSE, NULL);
+	hMutex3_arduinoPC = CreateMutex(NULL, FALSE, NULL);
+	
+	_beginthread(ThreadFuncSerialSendAckInterface, 0, NULL);
 	_beginthread(ThreadFuncSerial, 0, NULL);
 	_beginthread(ThreadFuncShowCloud, 0, NULL);
-	_beginthread(ThreadFuncUserInterface, 0, NULL);
+	//_beginthread(ThreadFuncUserInterface, 0, NULL);
 
+	
 	while (true)
 	{
 		::Sleep(100);

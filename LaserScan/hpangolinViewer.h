@@ -20,8 +20,8 @@ HWND  desktop, task;
 int saveImage_flag = -1;
 bool saveScanFile_flag = 0;
 bool set_pwm = 0;
-int hpwm_value = 200;
-int vpwm_value = 60;
+int m_HAngleResolution = 500;
+//int vpwm_value = 60;
 char timePath[254];
 std::ofstream out_;// ("out.txt");
 class pangolinViewer
@@ -108,10 +108,10 @@ public:
 
 		//pangolin::Var<int> W_int_log("ui.W_step", 5, 1, 1E4, true);
 		//pangolin::Var<int> H_int_log("ui.H step", 5, 1, 1E4, true);
-		pangolin::Var<int> int_hpwm("ui.Int_HPwm", 200, 100, 500, true);
-		pangolin::Var<int> int_vpwm("ui.Int_VPwm", 60, 40, 240, true);
+		pangolin::Var<int> HAngleResolution("ui.HAngle", m_HAngleResolution, 300, 5000, true);
+	//	pangolin::Var<int> int_vpwm("ui.Int_VPwm", 60, 40, 240, true);
 
-		pangolin::Var<bool> send_pwm("ui.Send_Pwm", false, false);
+		//pangolin::Var<bool> send_pwm("ui.Send_Param", false, false);
 		//pangolin::Var<bool> send_Vpwm("ui.Send_VPwm", false, false);
 		pangolin::Var<bool> save_scan("ui.Save_Scan", false, false);
 
@@ -129,16 +129,15 @@ public:
 			Visualization3D_display.Activate(Visualization3D_sensor);
 			//pangolin::BindToContext("pt");
 
-			if (pangolin::Pushed(send_pwm))
-			{
-			//	printf("%d\n", (int)int_pwm);
-				WaitForSingleObject(hMutex5, INFINITE);
-				set_pwm = 1;
-				hpwm_value = (int)int_hpwm;
-				vpwm_value = (int)int_vpwm;
-				ReleaseMutex(hMutex5);
+			//if (pangolin::Pushed(send_pwm))
+			//{
+			////	printf("%d\n", (int)int_pwm);
+			//	WaitForSingleObject(hMutex5, INFINITE);
+			//	set_pwm = 1;
+			//	m_HAngleResolution = (int)HAngleResolution;
+			//	ReleaseMutex(hMutex5);
 
-			}
+			//}
 			if (pangolin::Pushed(start_button))
 			{
 				WaitForSingleObject(hMutex3, INFINITE);
