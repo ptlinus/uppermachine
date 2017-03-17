@@ -15,15 +15,13 @@ HANDLE hMutex5;
 
 
 
-HWND  desktop, task;
+float g_color = 0.9;
 
 int saveImage_flag = -1;
 bool saveScanFile_flag = 0;
 bool set_pwm = 0;
 int m_HAngleResolution = 500;
 //int vpwm_value = 60;
-char timePath[254];
-std::ofstream out_;// ("out.txt");
 class pangolinViewer
 {
 	bool			m_bRunning;
@@ -33,6 +31,9 @@ class pangolinViewer
 	std::string		m_winTitle;
 
 	std::vector<float> vpts;
+	std::vector<float> vpts1;
+	std::vector<float> vpts2;
+
 	
 public:
 	pangolinViewer()	{ m_bRunning = false; m_thViewer = NULL; pts = NULL; npts = 0; }
@@ -45,10 +46,10 @@ public:
 
 	void create(char *windowsname, int winW, int winH, int panelW = 0)
 	{
-		desktop = FindWindow("ProgMan", NULL);
-		task = FindWindow("Shell_TrayWnd", NULL);
-		ShowWindow(desktop, SW_HIDE);
-		ShowWindow(task, SW_HIDE);//隐藏任务栏 
+		//desktop = FindWindow("ProgMan", NULL);
+		//task = FindWindow("Shell_TrayWnd", NULL);
+		//ShowWindow(desktop, SW_HIDE);
+		//ShowWindow(task, SW_HIDE);//隐藏任务栏 
 
 
 		hMutex2 = CreateMutex(NULL, FALSE, NULL);
@@ -155,35 +156,35 @@ public:
 			{
 				vpts.clear();
 			}
-			static bool saveOnce = 1;
-			if (Save_file.Get())
-			{
-				if (saveOnce)
-				{
-					saveOnce = 0;
-					SYSTEMTIME st = { 0 };
-					GetLocalTime(&st);
-					sprintf(timePath, "./data/%d-%02d-%02d(%02d-%02d-%02d).txt",
-						st.wYear,
-						st.wMonth,
-						st.wDay,
-						st.wHour,
-						st.wMinute,
-						st.wSecond);
-					out_.open(timePath);
-				}
-				WaitForSingleObject(hMutex4, INFINITE);
-				saveScanFile_flag = 1;
-				ReleaseMutex(hMutex4);
-			}
-			else
-			{
-				if (out_.is_open())
-				{
-					out_.close();
-				}
-				saveOnce = 1;
-			}
+			//static bool saveOnce = 1;
+			//if (Save_file.Get())
+			//{
+			//	if (saveOnce)
+			//	{
+			//		saveOnce = 0;
+			//		SYSTEMTIME st = { 0 };
+			//		GetLocalTime(&st);
+			//		sprintf(timePath, "./data/%d-%02d-%02d(%02d-%02d-%02d).txt",
+			//			st.wYear,
+			//			st.wMonth,
+			//			st.wDay,
+			//			st.wHour,
+			//			st.wMinute,
+			//			st.wSecond);
+			//		out_.open(timePath);
+			//	}
+			//	WaitForSingleObject(hMutex4, INFINITE);
+			//	saveScanFile_flag = 1;
+			//	ReleaseMutex(hMutex4);
+			//}
+			//else
+			//{
+			//	if (out_.is_open())
+			//	{
+			//		out_.close();
+			//	}
+			//	saveOnce = 1;
+			//}
 			if (pangolin::Pushed(save_scan)) {
 				static int numPath = 0;
 				char pathBuf[254];
@@ -208,6 +209,19 @@ public:
 				{
 					glVertex3f(vpts[k], vpts[k + 1], vpts[k + 2]);
 				}
+				/*glPointSize(5.0f);
+				glColor3f(0.9, 0, 0);
+				for (int k = 0; k < vpts1.size(); k += 3)
+				{
+					glVertex3f(vpts1[k], vpts1[k + 1], vpts1[k + 2]);
+				}*/
+			/*	glPointSize(10.0f);
+				glColor3f(0.9, 0.9, 0);
+				for (int k = 0; k < vpts2.size(); k += 3)
+				{
+					glVertex3f(vpts2[k], vpts2[k + 1], vpts2[k + 2]);
+				}
+*/
 				ReleaseMutex(hMutex2);
 
 				glEnd();
@@ -258,12 +272,30 @@ public:
 		ReleaseMutex(hMutex2);
 
 	}
+	void updateCloudPoint1(float *points)
+	{
+		WaitForSingleObject(hMutex2, INFINITE);
+		vpts1.push_back(points[0]);
+		vpts1.push_back(points[1]);
+		vpts1.push_back(points[2]);
+		ReleaseMutex(hMutex2);
+
+	}
+	void updateCloudPoint2(float *points)
+	{
+		WaitForSingleObject(hMutex2, INFINITE);
+		vpts2.push_back(points[0]);
+		vpts2.push_back(points[1]);
+		vpts2.push_back(points[2]);
+		ReleaseMutex(hMutex2);
+
+	}
 	void stop()
 	{
-		if (out_.is_open())
+	/*	if (out_.is_open())
 		{
 			out_.close();
-		}
+		}*/
 		WaitForSingleObject(hMutex3, INFINITE);
 		saveImage_flag = 2;
 		ReleaseMutex(hMutex3);
@@ -271,8 +303,8 @@ public:
 		m_thViewer->detach();
 		if (m_thViewer) delete m_thViewer; m_thViewer = NULL;
 
-		ShowWindow(task, SW_SHOW);//显示  
-		ShowWindow(desktop, SW_SHOW);
+		//ShowWindow(task, SW_SHOW);//显示  
+		//ShowWindow(desktop, SW_SHOW);
 
 		::Sleep(1000);
 
