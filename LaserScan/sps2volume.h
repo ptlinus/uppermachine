@@ -15,12 +15,17 @@ public:
 
 	void set(float _distance, float vertRadian, float horRadian)
 	{
+		float angleAB = -4.1f;// 2.5;// 3.5;
+		float dt = vertRadian * 45 / atan(1.0f);
+		float angle = (dt + angleAB)*atan(1.0f) / 45;
 		theta = horRadian;
-		r = _distance * cos(vertRadian);	//sin(pi/2-vertRadian)
-		z = _distance * sin(vertRadian);	//cos(pi/2-vertRadian)
+		r = _distance * cos(angle);	//sin(pi/2-vertRadian)
+		z = _distance * sin(angle);	//cos(pi/2-vertRadian)
 		x = r * cos(theta);
 		y = r * sin(theta);
 	}
+
+
 	void update(float _z, float _r, float _theta)
 	{
 		z = _z;	r = _r; theta = _theta;
@@ -65,6 +70,7 @@ class sp1dProject
 		float avgR;
 		int npts;
 		bool isMean;
+		std::vector<int> idx;
 
 		void reset()
 		{
@@ -83,7 +89,7 @@ class sp1dProject
 				minZ = z;
 			avgZ += z;
 			avgR += r;
-			npts++;
+			npts += 1;
 		}
 		bool output(float &z, float &r)
 		{
@@ -107,14 +113,13 @@ class sp1dProject
 
 			return false;
 		}
-		bool isInvalid(float reso)
+		bool isInvalid(float error)
 		{
-			if (maxZ - minZ > reso)
-			{
-				reset();
+			float m = avgZ;
+			if (!isMean)
+				m /= npts;
+			if (maxZ - m > error)
 				return true;
-			}
-
 			return false;
 		}
 		void update(float _z, float _r)
@@ -124,9 +129,10 @@ class sp1dProject
 			maxZ = _z;
 			minZ = _z;
 			npts = 1;
+			isMean = true;
 		}
 	};
-
+	float error_;
 public:
 	sp1dProject()	{}
 	~sp1dProject()	{}
@@ -134,89 +140,144 @@ public:
 	std::vector<histCell> hist;
 	float reso;
 
-	void create(float maxR, float device_error, float resolution_factor = 2.5f)
+	void create(float maxR, float device_error, float resolution_factor = 6.0f)
 	{
+		error_ = device_error;
 		reso = device_error * resolution_factor;
 		int hist_len = int(maxR / reso) + 1;
-		hist.resize(hist_len << 1);
+		hist.resize(hist_len);
 	}
 	void filter(spMap &out, sensorPoint *spLine, int num)
 	{
 		for (int i = 0; i < hist.size(); ++i)
 		{
 			hist[i].reset();
+			hist[i].idx.clear();
 		}
 
 		int maxId = -INT_MAX, minId = INT_MAX;
-		int half_hist_len = hist.size() >> 1;
-		histCell *midHist = &hist[half_hist_len];
 		for (int i = 0; i < num; ++i)
 		{
-			if(spLine[i].z < 300)
-			    continue;
+			if (spLine[i].z < 300)
+				continue;
 			int id = int(spLine[i].r / reso);
 			if (id > maxId) maxId = id;
 			if (id < minId) minId = id;
-			//std::cout<<spLine[i].r <<"\t"<<id<<std::endl;
-			midHist[id].append(spLine[i].z, spLine[i].r);
+			hist[id].append(spLine[i].z, spLine[i].r);
+			hist[id].idx.push_back(i);
 		}
-
-		int forward = 0, tail = 0;
-		minId += half_hist_len, maxId += half_hist_len;
-		int inValidPoints = 0;
-		//最大最小的z差异点太多就把这条线剔除
 		for (int i = minId; i < maxId; ++i)
 		{
-			if (hist[i].isInvalid(reso)) inValidPoints++;
+			float z, r;
+			hist[i].output(z, r);
+			if (hist[i].isInvalid(6 * error_))
+				hist[i].avgZ = hist[i].maxZ;
 		}
-		if (maxId - minId - inValidPoints < 5) return;
-
-		for (int i = minId; i <maxId; ++i)
+		int nn = minId;
+		for (; nn < maxId - 1; ++nn)
 		{
-			sensorPoint sp;
-			if (hist[i].output(sp.z, sp.r))
+			float z, r;
+			hist[nn].output(z, r);
+			for (int kk = 0; kk < hist[nn].idx.size(); ++kk)
 			{
-				sp.update(hist[i].avgZ, hist[i].avgR, spLine[0].theta);
-				out.append(sp);
-			}
-			else
-			{
-				forward = i ? 1 : 0;
-				tail = 1;
-				while (hist[i + tail].npts == 0 && (i + tail < maxId - 1))
+				if (spLine[hist[nn].idx[kk]].z >= 0.98f*z && spLine[hist[nn].idx[kk]].z <= hist[nn].maxZ)
 				{
-					tail++;
+					out.append(spLine[hist[nn].idx[kk]]);
 				}
-				if (i + tail >= (maxId - 1))
-					tail = 0;
-				float ratio = float(forward) / (forward + tail);
-				float fz, fr, tz, tr;
-				hist[i - forward].output(fz, fr);
-				hist[i + tail].output(tz, tr);
-				float z = ratio * fz + (1 - ratio)*tz;
-				float r = ratio * fr + (1 - ratio)*tr;
-				sp.update(z, r, spLine[0].theta);
-				hist[i].update(z, r);
-				out.append(sp);
 			}
 		}
 
-		sensorPoint sp;
-		hist[maxId].output(sp.z, sp.r);
-		if (hist[maxId].maxZ - hist[maxId].minZ > reso)
+		//for (int i = minId; i < maxId; ++i)
+		//{
+		//	if (hist[i].isInvalid(5 * error_))
+		//		hist[i].idx.clear();
+		//}
+		//for (int nn = minId; nn < maxId; ++nn)
+		//{
+		//	for (int kk = 0; kk < hist[nn].idx.size(); ++kk)
+		//		out.append(spLine[hist[nn].idx[kk]]);
+		//}
+
+		//std::cout<<hist[maxId].minZ<<"\t"<<hist[maxId].maxZ<<"\t"<<hist[maxId].npts<<std::endl;
+		//std::cout<<hist[maxId-1].minZ<<"\t"<<hist[maxId-1].maxZ<<"\t"<<hist[maxId-1].npts<<std::endl;
+		float last_z = 0.0f;
+		int count_z = 0;
+		for (; nn <= maxId; ++nn){
+			float border_max_limit_z = hist[nn].maxZ;
+			float border_min_limit_z = 0.96*hist[nn].maxZ > 0.9*last_z ? 0.96*hist[nn].maxZ : 0.9*last_z;
+			hist[nn].reset();
+			for (int kk = 0; kk < hist[nn].idx.size(); ++kk)
+			{
+				if (spLine[hist[nn].idx[kk]].z >= border_min_limit_z && spLine[hist[nn].idx[kk]].z <= border_max_limit_z)
+				{
+					//hist[nn].append(spLine[hist[nn].idx[kk]].z, spLine[hist[nn].idx[kk]].r);
+					out.append(spLine[hist[nn].idx[kk]]);
+					last_z += spLine[hist[nn].idx[kk]].z;
+					count_z++;
+				}
+			}
+
+			last_z /= count_z;
+		}
+		//std::cout<<hist[maxId].minZ<<"\t"<<hist[maxId].maxZ<<"\t"<<hist[maxId].npts<<std::endl;
+
+		/* int forward = 0, tail = 0;
+
+		int inValidPoints = 0;
+		//最大最小的z差异点太多就把这条线剔除
+		for(int i = minId; i < maxId; ++i)
 		{
-			float ratio = 0.8f;
-			//std::cout<<hist[maxId-1].avgZ << "\t"<<hist[maxId].maxZ<<std::endl;
-			float z = ratio * hist[maxId - 1].avgZ + (1 - ratio)*hist[maxId].maxZ;
-			float r = hist[maxId].avgR;
-			sp.update(z, r, spLine[0].theta);
-			out.append(sp, true);
+		if(hist[i].isInvalid(reso)) inValidPoints++;
+		}
+		if(maxId - minId - inValidPoints < 5) return;
+
+		for(int i = minId; i <maxId; ++i)
+		{
+		sensorPoint sp;
+		if(hist[i].output(sp.z, sp.r))
+		{
+		sp.update(hist[i].avgZ, hist[i].avgR, spLine[0].theta);
+		out.append(sp);
 		}
 		else
 		{
-			sp.update(hist[maxId].avgZ, hist[maxId].avgR, spLine[0].theta);
-			out.append(sp, true);
+		forward = i ? 1 : 0;
+		tail = 1;
+		while(hist[i+tail].npts == 0 && (i+tail < maxId-1))
+		{
+		tail++;
 		}
+		if(i+tail >= (maxId-1))
+		tail = 0;
+		float ratio = float(forward)/(forward+tail);
+		float fz, fr, tz, tr;
+		hist[i-forward].output(fz, fr);
+		hist[i+tail].output(tz, tr);
+		float z =  ratio * fz + (1-ratio)*tz;
+		float r = ratio * fr + (1-ratio)*tr;
+		sp.update(z, r, spLine[0].theta);
+		hist[i].update(z, r);
+		out.append(sp);
+		}
+		}
+
+
+		sensorPoint sp;
+		hist[maxId].output(sp.z, sp.r);
+		if(hist[maxId].maxZ - hist[maxId].minZ > reso)
+		{
+		float ratio = 0.8f;
+		//std::cout<<hist[maxId-1].avgZ << "\t"<<hist[maxId].maxZ<<std::endl;
+		float z = ratio * hist[maxId-1].avgZ + (1-ratio)*hist[maxId].maxZ;
+		float r = hist[maxId].avgR;
+		sp.update(z, r, spLine[0].theta);
+		out.append(sp, true);
+		}
+		else
+		{
+		sp.update(hist[maxId].avgZ, hist[maxId].avgR, spLine[0].theta);
+		out.append(sp, true);
+		}*/
 	}
 };
 

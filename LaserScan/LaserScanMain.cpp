@@ -36,7 +36,8 @@ DWORD m_dwCommEvents;
 std::queue<struct pointStruct>m_scanBuff;
 
 //#define OFFLINE
-
+#define HORI_PLUS 8000
+#define VERT_PLUS 8000
 
 struct wareHouseParam
 {
@@ -74,18 +75,24 @@ std::ofstream out_;// ("out.txt");
 char timePath[254];
 
 bool m_ackOk_arduino_pc = 0;
+bool m_ackOk_pc_pc = 0;
 //int m_switch_on_arduino_pc = 0;
 
-
-
+int m_pc2pcState = -1;  //0-首次启动   3-扫描完成   4-扫描出错
+int scanProgress = 0;// 扫描进度
+spMap g_map;
 
 
 
 void initPhase();
 bool loadConfig();
 
-float plus2radialH = 8.0*atan(1.0f) / 8000.0f;
-float plus2radialV = 8.0*atan(1.0f) / 8000.0f;
+
+
+
+
+float plus2radialH = 8.0*atan(1.0f) / HORI_PLUS;
+float plus2radialV = 8.0*atan(1.0f) / VERT_PLUS;
 
 void change(float &h, float &v)
 {
@@ -400,16 +407,40 @@ unsigned char serialBuf_data[MAX_BUFF];
 int serial_data_indx = 0;
 HANDLE hMutex1;
 HANDLE hMutex2_arduinoPC;
+HANDLE hMutex2_pc2PC;
 HANDLE hMutex3_arduinoPC;
 //int m_switch_on_ack = 0;
 
+HANDLE hMutex_pc2PCState;
 
 
+int ackSignal_ok[] = { 11, 22, 55, 18, 1, 66, 66, 0xb2 };
+int ackSignal_error[] = { 11, 22, 55, 18, 1, 44, 44, 0xb2 };
+
+
+int startSignal[] = { 11, 22, 55, 15, 1, 55, 55, 0xb2 }; //首次启动
+int rateOfProgressSignal[] = { 11, 22, 55, 13, 1, 0, 0, 0xb2 };//扫描进度
+int bulkSignal[] = { 11, 22, 55, 14, 1, 0, 0, 0xb2 };//扫描体积
+int finshSignal[] = { 11, 22, 55, 19, 1, 55, 55, 0xb2 };//扫描完成
+int errorSignal[] = { 11, 22, 55, 20, 1, 44, 44, 0xb2 };//扫描出错
+
+
+#define DATAMARKBITNUM 7
+char g_receValidDataBuf[DATAMARKBITNUM][50];
+#define STARTSIZE 3
+WSADATA wsaData;                                   //指向WinSocket信息结构的指针
+SOCKET sockListener;
+SOCKADDR_IN saUdpServ;
+int nSize = sizeof(SOCKADDR_IN);
 
 
 void ThreadFuncSerialSendAckInterface(PVOID param)
 {
-	int switch_on_ack = 0;
+	sps2volume vol;
+	int volume = 0;
+
+	int pc2pcSwitch = -1;    //PC和pc
+	int switch_on_ack = 0;  //arduino和PC
 	unsigned char pariXOR = 0;
 	char sendBuf[50];
 	int HAngleResolution = 500;
@@ -425,71 +456,56 @@ void ThreadFuncSerialSendAckInterface(PVOID param)
 			WaitForSingleObject(hMutex3, INFINITE);
 			saveImage_flag = 0;
 			ReleaseMutex(hMutex3);
-			//WaitForSingleObject(hMutex3_arduinoPC, INFINITE);
 			switch_on_ack = 1;
-			//ReleaseMutex(hMutex3_arduinoPC);
 			openFileSavePoint();
-			printf("start\n");
-
-
 		}
 		if (2 == flagSave)
 		{
 			WaitForSingleObject(hMutex3, INFINITE);
 			saveImage_flag = 0;
 			ReleaseMutex(hMutex3);
-			//WaitForSingleObject(hMutex3_arduinoPC, INFINITE);
 			switch_on_ack = 0;
-			//ReleaseMutex(hMutex3_arduinoPC);
 			closeFileSavePoint();
-			printf("stop\n");
-
 		}
-		//WaitForSingleObject(hMutex5, INFINITE);
-		//bool sendPwmFlag = set_pwm;
-		//ReleaseMutex(hMutex5);
-		//if (sendPwmFlag)
-		//{
-		//	WaitForSingleObject(hMutex5, INFINITE);
-		//	set_pwm = 0;
-		//	HAngleResolution = m_HAngleResolution;
-		//	ReleaseMutex(hMutex5);
-
-		//	//WaitForSingleObject(hMutex3_arduinoPC, INFINITE);
-		//	switch_on_ack = 2;
-		//	//ReleaseMutex(hMutex3_arduinoPC);
-		//}
-		/*	WaitForSingleObject(hMutex3_arduinoPC, INFINITE);
-		switch_on_ack = m_switch_on_ack;
-		ReleaseMutex(hMutex3_arduinoPC);*/
 		switch (switch_on_ack)
 		{
 		case 0:		//发送停止信号
 			sprintf(sendBuf, "55 13 0 2 2 77 ");
 			len = (strlen(sendBuf));
 			WriteChar(sendBuf, len);
-			Sleep(2000);
-			WaitForSingleObject(hMutex2_arduinoPC, INFINITE);
-			if (m_ackOk_arduino_pc)
+			for (int i = 0; i < 20; i++)
 			{
-				m_ackOk_arduino_pc = 0;
-				switch_on_ack = 4;
+				Sleep(100);
+				WaitForSingleObject(hMutex2_arduinoPC, INFINITE);
+				if (m_ackOk_arduino_pc)
+				{
+					m_ackOk_arduino_pc = 0;
+					switch_on_ack = -1;
+					ReleaseMutex(hMutex2_arduinoPC);
+					std::cout << "发送停止信号" << std::endl;
+					break;
+				}
+				ReleaseMutex(hMutex2_arduinoPC);
 			}
-			ReleaseMutex(hMutex2_arduinoPC);
-
 			break;
 		case 1:    //发送启动信号
 			sprintf(sendBuf, "55 12 0 1 1 77 ");
 			len = (strlen(sendBuf));
 			WriteChar(sendBuf, len);
-			Sleep(2000);
-			WaitForSingleObject(hMutex2_arduinoPC, INFINITE);
-			if (m_ackOk_arduino_pc)
+			for (int i = 0; i < 20; i++)
 			{
-				m_ackOk_arduino_pc = 0;
-				switch_on_ack = 2;
+				Sleep(100);
+				WaitForSingleObject(hMutex2_arduinoPC, INFINITE);
+				if (m_ackOk_arduino_pc)
+				{
+					m_ackOk_arduino_pc = 0;
+					switch_on_ack = 2;
+					ReleaseMutex(hMutex2_arduinoPC);
+					std::cout << "发送启动信号" << std::endl;
+					break;
+				}
+				ReleaseMutex(hMutex2_arduinoPC);
 			}
-			ReleaseMutex(hMutex2_arduinoPC);
 			break;
 		case 2:    //发送横向角分辨率
 			pariXOR ^= m_detectParam.HAngleResolution / 256;
@@ -498,26 +514,138 @@ void ThreadFuncSerialSendAckInterface(PVOID param)
 			sprintf(sendBuf, "55 16 %d %d %d 77 ", m_detectParam.HAngleResolution / 256, m_detectParam.HAngleResolution % 256, pariXOR);
 			len = (strlen(sendBuf));
 			WriteChar(sendBuf, len);
-			Sleep(2000);
-			WaitForSingleObject(hMutex2_arduinoPC, INFINITE);
-			if (m_ackOk_arduino_pc)
+			for (int i = 0; i < 20; i++)
 			{
-				m_ackOk_arduino_pc = 0;
-				switch_on_ack = 4;
+				Sleep(100);
+				WaitForSingleObject(hMutex2_arduinoPC, INFINITE);
+				if (m_ackOk_arduino_pc)
+				{
+					m_ackOk_arduino_pc = 0;
+					switch_on_ack = -1;
+					ReleaseMutex(hMutex2_arduinoPC);
+					std::cout << "发送横向角分辨率" << std::endl;
+					break;
+				}
+				ReleaseMutex(hMutex2_arduinoPC);
 			}
-			ReleaseMutex(hMutex2_arduinoPC);
 			break;
-		case 4: //判断应答信号
+		default://判断应答信号
 			break;
-		//case 5:   
-		//	sprintf(sendBuf, "55 14 0 1 1 77 ");//发送应答信息  当arduino发送给PC数据后
-		//	len = (strlen(sendBuf));
-		//	WriteChar(sendBuf, len);
-		//	break;
+		}
+		/////////////////////////////////////////////////////////////
+
+
+		WaitForSingleObject(hMutex_pc2PCState, INFINITE);
+		int pc2pcState = m_pc2pcState;
+		ReleaseMutex(hMutex_pc2PCState);
+		if (pc2pcState != -1)
+		{
+			m_pc2pcState = -1;
+			pc2pcSwitch = pc2pcState;
+		}
+		switch (pc2pcSwitch)
+		{
+		case 0:  //首次启动15
+			len = sizeof(startSignal);// / sizeof(int);
+			sendto(sockListener, (char *)&startSignal, len, 0, (SOCKADDR *)&saUdpServ, nSize);
+			for (int i = 0; i < 20; i++)
+			{
+				Sleep(100);
+				WaitForSingleObject(hMutex2_pc2PC, INFINITE);
+				if (m_ackOk_pc_pc)
+				{
+					m_ackOk_pc_pc = 0;
+					pc2pcSwitch = -1;
+					ReleaseMutex(hMutex2_pc2PC);
+					std::cout << "首次启动" << std::endl;
+					break;
+				}
+				ReleaseMutex(hMutex2_pc2PC);
+			}
+			break;
+		case 1:  //扫描进度13
+			len = sizeof(rateOfProgressSignal);// / sizeof(int);
+			WaitForSingleObject(hMutex_pc2PCState, INFINITE);
+			rateOfProgressSignal[5] = (float)scanProgress / (float)HORI_PLUS * 100;
+			ReleaseMutex(hMutex_pc2PCState);
+			rateOfProgressSignal[6] = rateOfProgressSignal[5];
+			sendto(sockListener, (char *)&rateOfProgressSignal, len, 0, (SOCKADDR *)&saUdpServ, nSize);
+			for (int i = 0; i < 20; i++)
+			{
+				Sleep(100);
+				WaitForSingleObject(hMutex2_pc2PC, INFINITE);
+				if (m_ackOk_pc_pc)
+				{
+					m_ackOk_pc_pc = 0;
+					pc2pcSwitch = -1;
+					ReleaseMutex(hMutex2_pc2PC);
+					break;
+				}
+				ReleaseMutex(hMutex2_pc2PC);
+			}
+			break;
+		case 2:  //扫描体积14
+			volume = vol.execute(&g_map.vsp[0], g_map.vsp.size()) / 1000000;//立方米
+			bulkSignal[5] = volume;
+			bulkSignal[6] = bulkSignal[5];
+
+			std::cout << volume << std::endl;
+
+			len = sizeof(bulkSignal);// / sizeof(int);
+			sendto(sockListener, (char *)&bulkSignal, len, 0, (SOCKADDR *)&saUdpServ, nSize);
+			for (int i = 0; i < 20; i++)
+			{
+				Sleep(100);
+				WaitForSingleObject(hMutex2_pc2PC, INFINITE);
+				if (m_ackOk_pc_pc)
+				{
+					m_ackOk_pc_pc = 0;
+					pc2pcSwitch = -1;
+					ReleaseMutex(hMutex2_pc2PC);
+					break;
+				}
+				ReleaseMutex(hMutex2_pc2PC);
+			}
+			break;
+		case 3:  //扫描完成19
+			len = sizeof(finshSignal);// / sizeof(int);
+			sendto(sockListener, (char *)&finshSignal, len, 0, (SOCKADDR *)&saUdpServ, nSize);
+			for (int i = 0; i < 20; i++)
+			{
+				Sleep(100);
+				WaitForSingleObject(hMutex2_pc2PC, INFINITE);
+				if (m_ackOk_pc_pc)
+				{
+					m_ackOk_pc_pc = 0;
+					pc2pcSwitch = 2;  //发送扫描体积
+					ReleaseMutex(hMutex2_pc2PC);
+					std::cout << "扫描完成" << std::endl;
+					break;
+				}
+				ReleaseMutex(hMutex2_pc2PC);
+			}
+			break;
+		case 4:  //扫描出错20
+			len = sizeof(errorSignal);// / sizeof(int);
+			sendto(sockListener, (char *)&errorSignal, len, 0, (SOCKADDR *)&saUdpServ, nSize);
+			for (int i = 0; i < 20; i++)
+			{
+				Sleep(100);
+				WaitForSingleObject(hMutex2_pc2PC, INFINITE);
+				if (m_ackOk_pc_pc)
+				{
+					m_ackOk_pc_pc = 0;
+					pc2pcSwitch = -1;
+					ReleaseMutex(hMutex2_pc2PC);
+					std::cout << "扫描出错" << std::endl;
+					break;
+				}
+				ReleaseMutex(hMutex2_pc2PC);
+			}
+			break;
 		default:
 			break;
 		}
-
 	}
 }
 
@@ -719,6 +847,22 @@ void ThreadFuncSerial(PVOID param)
 						len = (strlen(sendBuf));
 						WriteChar(sendBuf, len);
 						printf("扫描完毕！\n");
+
+						WaitForSingleObject(hMutex_pc2PCState, INFINITE);
+						m_pc2pcState = 3;
+						ReleaseMutex(hMutex_pc2PCState);
+					}
+					else if (dataMarkBitIdx == 5)
+					{
+						char sendBuf[50];
+						sprintf(sendBuf, "55 14 0 1 1 77 ");//发送应答信息  当arduino发送给PC数据后
+						len = (strlen(sendBuf));
+						WriteChar(sendBuf, len);
+						printf("扫描出错！\n");
+
+						WaitForSingleObject(hMutex_pc2PCState, INFINITE);
+						m_pc2pcState = 4;
+						ReleaseMutex(hMutex_pc2PCState);
 					}
 
 				}
@@ -825,41 +969,19 @@ void parseData_3po(std::string inputFile)
 
 void ThreadFuncShowCloud(PVOID param)
 {
-	//	pcf.init();
-	//pcf.open("5.txt");
-	statisticMapper csm;
-	float fp[3] = { 0, 0, 5000.0f };
-	csm.createColumn(5, 5, 1000, 5000);
-	csm.setSensor(0, fp);
-	//csm.appendSensor(0, fp);
-	//csm.create(5, 5, 2000, 2000, 1000);
-	int xxx = 0;
+	sp1dProject pro;
+	pro.create(4000, 20);
+	int oneLinePointNum = 0;
+	float last_h;
+	std::vector<sensorPoint> linePoints;
 
-	float plus2radialH = 8.0*atan(1.0f) / 24000.0f;
-	float plus2radialV = 8.0*atan(1.0f) / 8000.0f;
 
+#ifdef OFFLINE
 	int  cx = GetSystemMetrics(SM_CXSCREEN);
 	int  cy = GetSystemMetrics(SM_CYSCREEN);
 	pv.create("立体式粮仓储量检测系统-大野感知", cx, cy, 160);
-
-#ifdef OFFLINE
-	plus2radialH = 8.0*atan(1.0f) / 8000.0f;
 	parseData_3po("C:\\2017-01-12(16-08-09).txt");
-
-	std::vector<sensorPoint> points;
-	spMap map;
-	sp1dProject pro;
-	pro.create(4000, 20);
-	int count = 1;
-	bool endFlag = false;
-	bool ascend = true;
-	float h, v, d;
-	float last_h;
 #endif
-
-
-
-
 	while (1)
 	{
 		WaitForSingleObject(hMutex1, INFINITE);
@@ -882,7 +1004,7 @@ void ThreadFuncShowCloud(PVOID param)
 					out_ << pt.theta_h << " " << pt.theta_v << " " << pt.len << std::endl;
 				}
 			}
-#ifdef OFFLINE
+			sensorPoint sp;
 			static bool startData = 1;
 			if (startData)
 			{
@@ -893,61 +1015,32 @@ void ThreadFuncShowCloud(PVOID param)
 			{
 				if (abs(last_h - pt.theta_h) > 5)
 				{
-					pro.filter(map, &points[0], count);
-					points.clear();
-					count = 0;
+					WaitForSingleObject(hMutex_pc2PCState, INFINITE);
+					m_pc2pcState = 1;  //扫描进度
+					scanProgress = pt.theta_h;
+					ReleaseMutex(hMutex_pc2PCState);
 
-					//startData = 1;
+
+					pro.filter(g_map, &linePoints[0], oneLinePointNum);
+					linePoints.clear();
+					oneLinePointNum = 0;
 				}
 
 				last_h = pt.theta_h;
-				h = pt.theta_h;
-				v = pt.theta_v;
+				float h = pt.theta_h;
+				float v = pt.theta_v;
 				change(h, v);
-
-				sensorPoint sp;
-				sp.set(pt.len,v, h);
-				points.push_back(sp);
-				count++;
+				sp.set(pt.len, v, h);
+				linePoints.push_back(sp);
+				oneLinePointNum++;
 			}
-
-#endif
-
-
-
+#ifdef OFFLINE
 			float ypr[3];
-			float len_center = 0.0;
-			float angleAB = -4.1f;// 2.5;// 3.5;
-			float a = 0.0f, b = 0, c = 0;
-
-			float angle = plus2radialV * (pt.theta_v);
-			float dt = angle * 45 / atan(1.0f);
-			angle = (dt + angleAB)*atan(1.0f) / 45;
-			//	printf("%d %f\n", i, dt);
-			float theta = (angle);// +2.0f*atan(1.0f);
-			float phi = plus2radialH * (pt.theta_h);
-
-			float rs = pt.len * cos(theta);
-			ypr[0] = rs * cos(phi);// +b*sin(phi) + c*cos(phi);
-			ypr[1] = rs * sin(phi);// +b*cos(phi) + c*sin(phi);
-			ypr[2] = pt.len * sin(theta);// +a;
-			//if (sqrt(pow(ypr[0], 2)+pow(ypr[1], 2)) > 1000)
-			//{
-			//	continue;
-			//}
-			//if (ypr[2] > 600)
-			//{
-			WaitForSingleObject(hMutex2, INFINITE);
-			csm.update(0, ypr[0], ypr[1], ypr[2], 1.0f);
-			ReleaseMutex(hMutex2);
-
-			//}
-
-
-			//csm.postprocess(900.0f, 15);
-			//csm.xyzList()
+			ypr[0] = sp.x;
+			ypr[1] = sp.y;
+			ypr[2] = sp.z;
 			pv.updateCloudPoint(ypr);
-
+#endif
 			WaitForSingleObject(hMutex1, INFINITE);
 			flag = m_scanBuff.empty();
 			ReleaseMutex(hMutex1);
@@ -960,39 +1053,27 @@ void ThreadFuncShowCloud(PVOID param)
 					END = 0;
 					g_color = 0;
 					float ypr[3];
-					for (int i = 0; i < map.vsp.size(); i++)
+					for (int i = 0; i < g_map.vsp.size(); i++)
 					{
-						ypr[0] = map.vsp[i].x;
-						ypr[1] = map.vsp[i].y;
-						ypr[2] = map.vsp[i].z;
+						ypr[0] = g_map.vsp[i].x;
+						ypr[1] = g_map.vsp[i].y;
+						ypr[2] = g_map.vsp[i].z;
 
-						//csm.update(0, map.vsp[i].x, map.vsp[i].y, map.vsp[i].z, 1.0f);
-						//pv.updateCloudPoint(ypr);
-						//WaitForSingleObject(hMutex2, INFINITE);
-						//csm.update(0, ypr[0], ypr[1], ypr[2], 1.0f);
-						//ReleaseMutex(hMutex2);
-
-						//}
-
-
-						//csm.postprocess(900.0f, 15);
-						//csm.xyzList()
 						pv.updateCloudPoint1(ypr);
-
 					}
 
-					for (int i = 0; i < map.vborderIdx.size(); i++)
+					for (int i = 0; i < g_map.vborderIdx.size(); i++)
 					{
-						ypr[0] = map.vsp[map.vborderIdx[i]].x;
-						ypr[1] = map.vsp[map.vborderIdx[i]].y;
-						ypr[2] = map.vsp[map.vborderIdx[i]].z;
+						ypr[0] = g_map.vsp[g_map.vborderIdx[i]].x;
+						ypr[1] = g_map.vsp[g_map.vborderIdx[i]].y;
+						ypr[2] = g_map.vsp[g_map.vborderIdx[i]].z;
 						pv.updateCloudPoint2(ypr);
 
 					}
 				}
 
 				sps2volume vol;
-				double volume = vol.execute(&map.vsp[0], map.vsp.size()) / 1000000;//立方米
+				double volume = vol.execute(&g_map.vsp[0], g_map.vsp.size()) / 1000000;//立方米
 				std::cout << volume << std::endl;
 			}
 #endif
@@ -1005,18 +1086,9 @@ void ThreadFuncShowCloud(PVOID param)
 }
 
 
-int startSignal[] = { 11, 22, 55, 15, 1, 0x55, 0x55, 0xb2 };
-int ackSignal_ok[] = { 11, 22, 55, 18, 1, 0x66, 0x66, 0xb2 };
-int ackSignal_error[] = { 11, 22, 55, 18, 1, 0x44, 0x44, 0xb2 };
 
-#define DATAMARKBITNUM 7
-char g_receValidDataBuf[DATAMARKBITNUM][50];
-#define STARTSIZE 3
 void ThreadFuncUserInterface(PVOID param)
 {
-	WSADATA wsaData;                                   //指向WinSocket信息结构的指针
-	SOCKET sockListener;
-	SOCKADDR_IN saUdpServ;
 	//saClient用来从广播地址接收消息
 	char cRecvBuff[800];                               //定义接收缓冲区
 	if (WSAStartup(MAKEWORD(1, 1), &wsaData) != 0)           //进行WinSocket的初始化
@@ -1045,9 +1117,10 @@ void ThreadFuncUserInterface(PVOID param)
 	unsigned char validDataBuf[50];
 	int validIndx = 0;
 
-	int nSize = sizeof(SOCKADDR_IN);
 
-	sendto(sockListener, (char *)&startSignal, 32, 0, (SOCKADDR *)&saUdpServ, nSize);
+	WaitForSingleObject(hMutex_pc2PCState, INFINITE);
+	m_pc2pcState = 0;
+	ReleaseMutex(hMutex_pc2PCState);
 
 	//起始字节55+参数标识位+数据长度LEN+数据DATA+校验码X0R+结束字节77
 
@@ -1061,7 +1134,7 @@ void ThreadFuncUserInterface(PVOID param)
 		}
 		static unsigned char len = 0;
 		int indX = 0;
-		static unsigned char verifyBit = 0;
+		static int verifyBit = 0;
 		for (int i = 0; i < recvLen / 4; i++)
 		{
 			switch (switch_on)
@@ -1118,6 +1191,8 @@ void ThreadFuncUserInterface(PVOID param)
 				//16->启动设备            A->B
 				//17->关闭设备            A->B
 				//18->数据应答             A--B
+				//19->扫描完成             B->A
+				//20->扫描出错             B->A
 				if (recvpacket[i] / 10 == 1)
 				{
 					unsigned char LowBit = recvpacket[i] % 10;
@@ -1139,7 +1214,7 @@ void ThreadFuncUserInterface(PVOID param)
 				break;
 			case 2:  //数据长度len
 			{
-				len = recvpacket[i] / 4;
+				len = recvpacket[i];// / 4;
 				//	indX = i + 1;
 				validIndx = 0;
 				verifyBit = 0;
@@ -1172,15 +1247,43 @@ void ThreadFuncUserInterface(PVOID param)
 				{
 					//出错----丢弃数据包
 					switch_on = 7; //状态转移
+					if (8 == dataMarkBitIdx)
+					{
+						WaitForSingleObject(hMutex2_pc2PC, INFINITE);
+						m_ackOk_pc_pc = 0;
+						ReleaseMutex(hMutex2_pc2PC);
+					}
 				}
 				else{
-					for (int i = 0; i < len; i += 6)
+					if (6 == dataMarkBitIdx) //启动设备
 					{
-						g_receValidDataBuf[dataMarkBitIdx][i] = validDataBuf[i];
+						WaitForSingleObject(hMutex3, INFINITE);
+						saveImage_flag = 1;
+						ReleaseMutex(hMutex3);
+						switch_on = 6; //数据包接收完成----应答正确
 					}
+					else if (7 == dataMarkBitIdx) //停止设备
+					{
+						WaitForSingleObject(hMutex3, INFINITE);
+						saveImage_flag = 2;
+						ReleaseMutex(hMutex3);
+						switch_on = 6; //数据包接收完成----应答正确
+					}
+					else if (8 == dataMarkBitIdx)
+					{
+						WaitForSingleObject(hMutex2_pc2PC, INFINITE);
+						m_ackOk_pc_pc = 1;
+						ReleaseMutex(hMutex2_pc2PC);
+						switch_on = 0; //状态转移
+						break;
+					}
+
+					/*for (int i = 0; i < len; i += 6)
+					{
+					g_receValidDataBuf[dataMarkBitIdx][i] = validDataBuf[i];
+					}*/
 					printf("\n成功接收数据包——>%d(%d)\n", (trueNum++) * 8, errorNum);
 
-					switch_on = 6; //数据包接收完成----应答正确
 				}
 			case 6: //应答信号---正确
 				sendto(sockListener, (char *)&ackSignal_ok, 32, 0, (SOCKADDR *)&saUdpServ, nSize);
@@ -1211,10 +1314,13 @@ int main(int argc, char* argv[])
 	hMutex2_arduinoPC = CreateMutex(NULL, FALSE, NULL);
 	hMutex3_arduinoPC = CreateMutex(NULL, FALSE, NULL);
 
+	hMutex2_pc2PC = CreateMutex(NULL, FALSE, NULL);
+	hMutex_pc2PCState = CreateMutex(NULL, FALSE, NULL);
+
 	_beginthread(ThreadFuncSerialSendAckInterface, 0, NULL);
 	_beginthread(ThreadFuncSerial, 0, NULL);
 	_beginthread(ThreadFuncShowCloud, 0, NULL);
-	//_beginthread(ThreadFuncUserInterface, 0, NULL);
+	_beginthread(ThreadFuncUserInterface, 0, NULL);
 
 
 	while (true)

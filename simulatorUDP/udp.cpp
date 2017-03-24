@@ -98,7 +98,7 @@ void main()
 	//inet_pton(AF_INET, "127.0.0.1", (void*)&addrSrv.sin_addr.S_un.S_addr);
 	sin.sin_addr.S_un.S_addr = htonl(INADDR_ANY);// htonl(INADDR_BROADCAST);
 	sin.sin_family = AF_INET;
-	sin.sin_port = htons(7001);
+	sin.sin_port = htons(11011);
 	if (bind(sockClient, (SOCKADDR FAR *)&sin, sizeof(sin)) != 0)
 	{
 		printf("Can't bind socket to local port!Program stop.\n");//≥ı ºªØ ß∞‹∑µªÿ-1
