@@ -36,7 +36,7 @@ DWORD m_dwCommEvents;
 std::queue<struct pointStruct>m_scanBuff;
 
 //#define OFFLINE
-#define HORI_PLUS 8000
+#define HORI_PLUS 24000
 #define VERT_PLUS 8000
 
 struct wareHouseParam
@@ -440,7 +440,7 @@ void ThreadFuncSerialSendAckInterface(PVOID param)
 	int volume = 0;
 
 	int pc2pcSwitch = -1;    //PC和pc
-	int switch_on_ack = 0;  //arduino和PC
+	int switch_on_ack = -1;  //arduino和PC
 	unsigned char pariXOR = 0;
 	char sendBuf[50];
 	int HAngleResolution = 500;
@@ -451,21 +451,14 @@ void ThreadFuncSerialSendAckInterface(PVOID param)
 		int flagSave = saveImage_flag;
 		ReleaseMutex(hMutex3);
 
-		if (1 == flagSave)
+
+		if (-1 != flagSave)
 		{
 			WaitForSingleObject(hMutex3, INFINITE);
-			saveImage_flag = 0;
+			saveImage_flag = -1;
 			ReleaseMutex(hMutex3);
-			switch_on_ack = 1;
+			switch_on_ack = flagSave;
 			openFileSavePoint();
-		}
-		if (2 == flagSave)
-		{
-			WaitForSingleObject(hMutex3, INFINITE);
-			saveImage_flag = 0;
-			ReleaseMutex(hMutex3);
-			switch_on_ack = 0;
-			closeFileSavePoint();
 		}
 		switch (switch_on_ack)
 		{
@@ -482,7 +475,7 @@ void ThreadFuncSerialSendAckInterface(PVOID param)
 					m_ackOk_arduino_pc = 0;
 					switch_on_ack = -1;
 					ReleaseMutex(hMutex2_arduinoPC);
-					std::cout << "发送停止信号" << std::endl;
+					std::cout << "pc->arduino: 发送停止信号" << std::endl;
 					break;
 				}
 				ReleaseMutex(hMutex2_arduinoPC);
@@ -501,7 +494,7 @@ void ThreadFuncSerialSendAckInterface(PVOID param)
 					m_ackOk_arduino_pc = 0;
 					switch_on_ack = 2;
 					ReleaseMutex(hMutex2_arduinoPC);
-					std::cout << "发送启动信号" << std::endl;
+					std::cout << "pc->arduino: 发送启动信号" << std::endl;
 					break;
 				}
 				ReleaseMutex(hMutex2_arduinoPC);
@@ -523,7 +516,7 @@ void ThreadFuncSerialSendAckInterface(PVOID param)
 					m_ackOk_arduino_pc = 0;
 					switch_on_ack = -1;
 					ReleaseMutex(hMutex2_arduinoPC);
-					std::cout << "发送横向角分辨率" << std::endl;
+					std::cout << "pc->arduino: 发送横向角分辨率" << std::endl;
 					break;
 				}
 				ReleaseMutex(hMutex2_arduinoPC);
@@ -557,7 +550,7 @@ void ThreadFuncSerialSendAckInterface(PVOID param)
 					m_ackOk_pc_pc = 0;
 					pc2pcSwitch = -1;
 					ReleaseMutex(hMutex2_pc2PC);
-					std::cout << "首次启动" << std::endl;
+					std::cout << "PC <- PC: 首次启动" << std::endl;
 					break;
 				}
 				ReleaseMutex(hMutex2_pc2PC);
@@ -579,6 +572,7 @@ void ThreadFuncSerialSendAckInterface(PVOID param)
 					m_ackOk_pc_pc = 0;
 					pc2pcSwitch = -1;
 					ReleaseMutex(hMutex2_pc2PC);
+					std::cout << "PC <- PC: 扫描进度_" << rateOfProgressSignal[5] << std::endl;
 					break;
 				}
 				ReleaseMutex(hMutex2_pc2PC);
@@ -602,6 +596,7 @@ void ThreadFuncSerialSendAckInterface(PVOID param)
 					m_ackOk_pc_pc = 0;
 					pc2pcSwitch = -1;
 					ReleaseMutex(hMutex2_pc2PC);
+					std::cout << "PC <- PC: 扫描体积_" << bulkSignal[5] << std::endl;
 					break;
 				}
 				ReleaseMutex(hMutex2_pc2PC);
@@ -619,7 +614,7 @@ void ThreadFuncSerialSendAckInterface(PVOID param)
 					m_ackOk_pc_pc = 0;
 					pc2pcSwitch = 2;  //发送扫描体积
 					ReleaseMutex(hMutex2_pc2PC);
-					std::cout << "扫描完成" << std::endl;
+					std::cout << "PC <- PC: 扫描完成" << std::endl;
 					break;
 				}
 				ReleaseMutex(hMutex2_pc2PC);
@@ -637,7 +632,7 @@ void ThreadFuncSerialSendAckInterface(PVOID param)
 					m_ackOk_pc_pc = 0;
 					pc2pcSwitch = -1;
 					ReleaseMutex(hMutex2_pc2PC);
-					std::cout << "扫描出错" << std::endl;
+					std::cout << "PC <- PC: 扫描出错" << std::endl;
 					break;
 				}
 				ReleaseMutex(hMutex2_pc2PC);
@@ -684,7 +679,9 @@ void ThreadFuncSerial(PVOID param)
 
 	unsigned char dataMarkBitIdx = 0;
 
-
+	WaitForSingleObject(hMutex3, INFINITE);
+	saveImage_flag = 0;
+	ReleaseMutex(hMutex3);
 
 	while (1)
 	{
@@ -721,7 +718,7 @@ void ThreadFuncSerial(PVOID param)
 					}
 					else
 					{
-						printf("\n起始标志位未找到---%d(%d)\n", trueNum, errorNum++);  //起始标志位的第一个字节------未找到
+					//	printf("\n起始标志位未找到---%d(%d)\n", trueNum, errorNum++);  //起始标志位的第一个字节------未找到
 						flagEnd = 1;
 						continue;
 					}
@@ -731,7 +728,7 @@ void ThreadFuncSerial(PVOID param)
 
 					if (m_InPutBuff[i] != serialBuf_start[lenIndex])
 					{
-						printf("\n数据包出错---重新再来---%d(%d)\n", trueNum, errorNum++);
+						//printf("\n数据包出错---重新再来---%d(%d)\n", trueNum, errorNum++);
 						flagS = 1;
 						flagEnd = 1;
 						lenIndex = 0;
@@ -799,7 +796,7 @@ void ThreadFuncSerial(PVOID param)
 				if (verifyBit != m_InPutBuff[i])
 				{
 					//校验出错----丢弃数据包
-					printf("\n校验出错----丢弃数据包%d(%d)\n", trueNum, errorNum++);
+					//printf("\n校验出错----丢弃数据包%d(%d)\n", trueNum, errorNum++);
 					switch_on = 0; //状态转移
 				}
 				else
@@ -839,6 +836,7 @@ void ThreadFuncSerial(PVOID param)
 						WaitForSingleObject(hMutex2_arduinoPC, INFINITE);
 						m_ackOk_arduino_pc = 1;
 						ReleaseMutex(hMutex2_arduinoPC);
+						std::cout << "Arduino->PC: 应答信号" << std::endl;
 					}
 					else if (dataMarkBitIdx == 4)
 					{
@@ -846,7 +844,7 @@ void ThreadFuncSerial(PVOID param)
 						sprintf(sendBuf, "55 14 0 1 1 77 ");//发送应答信息  当arduino发送给PC数据后
 						len = (strlen(sendBuf));
 						WriteChar(sendBuf, len);
-						printf("扫描完毕！\n");
+						std::cout << "Arduino->PC: 扫描完毕！" << std::endl;
 
 						WaitForSingleObject(hMutex_pc2PCState, INFINITE);
 						m_pc2pcState = 3;
@@ -858,8 +856,7 @@ void ThreadFuncSerial(PVOID param)
 						sprintf(sendBuf, "55 14 0 1 1 77 ");//发送应答信息  当arduino发送给PC数据后
 						len = (strlen(sendBuf));
 						WriteChar(sendBuf, len);
-						printf("扫描出错！\n");
-
+						std::cout << "Arduino->PC: 扫描出错！" << std::endl;
 						WaitForSingleObject(hMutex_pc2PCState, INFINITE);
 						m_pc2pcState = 4;
 						ReleaseMutex(hMutex_pc2PCState);
@@ -958,7 +955,7 @@ void parseData_3po(std::string inputFile)
 		else
 		{
 			error_t++;
-			std::cout << "error。。。" << error_t << std::endl;
+		//	std::cout << "error。。。" << error_t << std::endl;
 		}
 	}
 	//std::cout << pointBuff.size() << error_t << std::endl;
@@ -1013,6 +1010,7 @@ void ThreadFuncShowCloud(PVOID param)
 			}
 			else
 			{
+
 				if (abs(last_h - pt.theta_h) > 5)
 				{
 					WaitForSingleObject(hMutex_pc2PCState, INFINITE);
@@ -1020,8 +1018,10 @@ void ThreadFuncShowCloud(PVOID param)
 					scanProgress = pt.theta_h;
 					ReleaseMutex(hMutex_pc2PCState);
 
-
-					pro.filter(g_map, &linePoints[0], oneLinePointNum);
+					if (linePoints.size() > 0)
+					{
+						pro.filter(g_map, &linePoints[0], oneLinePointNum);
+					}
 					linePoints.clear();
 					oneLinePointNum = 0;
 				}
@@ -1059,17 +1059,17 @@ void ThreadFuncShowCloud(PVOID param)
 						ypr[1] = g_map.vsp[i].y;
 						ypr[2] = g_map.vsp[i].z;
 
-						pv.updateCloudPoint1(ypr);
+					//	pv.updateCloudPoint2(ypr);
 					}
 
-					for (int i = 0; i < g_map.vborderIdx.size(); i++)
+					/*for (int i = 0; i < g_map.vborderIdx.size(); i++)
 					{
 						ypr[0] = g_map.vsp[g_map.vborderIdx[i]].x;
 						ypr[1] = g_map.vsp[g_map.vborderIdx[i]].y;
 						ypr[2] = g_map.vsp[g_map.vborderIdx[i]].z;
 						pv.updateCloudPoint2(ypr);
 
-					}
+					}*/
 				}
 
 				sps2volume vol;
@@ -1151,7 +1151,7 @@ void ThreadFuncUserInterface(PVOID param)
 					}
 					else
 					{
-						printf("\n起始标志位未找到---%d(%d)\n", trueNum, errorNum++);  //起始标志位的第一个字节------未找到
+						//printf("\n起始标志位未找到---%d(%d)\n", trueNum, errorNum++);  //起始标志位的第一个字节------未找到
 						flagEnd = 1;
 						continue;
 					}
@@ -1161,7 +1161,7 @@ void ThreadFuncUserInterface(PVOID param)
 
 					if (recvpacket[i] != serialBuf_start[lenIndex])
 					{
-						printf("\n数据包出错---重新再来---%d(%d)\n", trueNum, errorNum++);
+						//printf("\n数据包出错---重新再来---%d(%d)\n", trueNum, errorNum++);
 						flagS = 1;
 						flagEnd = 1;
 						lenIndex = 0;
@@ -1234,7 +1234,7 @@ void ThreadFuncUserInterface(PVOID param)
 				if (verifyBit != recvpacket[i])
 				{
 					//校验出错----丢弃数据包
-					printf("\n校验出错----丢弃数据包%d(%d)\n", trueNum, errorNum++);
+					//printf("\n校验出错----丢弃数据包%d(%d)\n", trueNum, errorNum++);
 					switch_on = 7; //状态转移
 				}
 				else
@@ -1247,12 +1247,6 @@ void ThreadFuncUserInterface(PVOID param)
 				{
 					//出错----丢弃数据包
 					switch_on = 7; //状态转移
-					if (8 == dataMarkBitIdx)
-					{
-						WaitForSingleObject(hMutex2_pc2PC, INFINITE);
-						m_ackOk_pc_pc = 0;
-						ReleaseMutex(hMutex2_pc2PC);
-					}
 				}
 				else{
 					if (6 == dataMarkBitIdx) //启动设备
@@ -1261,13 +1255,15 @@ void ThreadFuncUserInterface(PVOID param)
 						saveImage_flag = 1;
 						ReleaseMutex(hMutex3);
 						switch_on = 6; //数据包接收完成----应答正确
+						std::cout << "PC->PC: 启动设备！" << std::endl;
 					}
 					else if (7 == dataMarkBitIdx) //停止设备
 					{
 						WaitForSingleObject(hMutex3, INFINITE);
-						saveImage_flag = 2;
+						saveImage_flag = 0;
 						ReleaseMutex(hMutex3);
 						switch_on = 6; //数据包接收完成----应答正确
+						std::cout << "PC->PC: 关闭设备！" << std::endl;
 					}
 					else if (8 == dataMarkBitIdx)
 					{
@@ -1275,24 +1271,29 @@ void ThreadFuncUserInterface(PVOID param)
 						m_ackOk_pc_pc = 1;
 						ReleaseMutex(hMutex2_pc2PC);
 						switch_on = 0; //状态转移
+						std::cout << "PC->PC: 应答成功！" << std::endl;
 						break;
+					}
+					else if (2 == dataMarkBitIdx)
+					{
+						std::cout << "PC->PC: 建模参数！" << std::endl;
 					}
 
 					/*for (int i = 0; i < len; i += 6)
 					{
 					g_receValidDataBuf[dataMarkBitIdx][i] = validDataBuf[i];
 					}*/
-					printf("\n成功接收数据包——>%d(%d)\n", (trueNum++) * 8, errorNum);
+					//printf("\n成功接收数据包——>%d(%d)\n", (trueNum++) * 8, errorNum);
 
 				}
 			case 6: //应答信号---正确
 				sendto(sockListener, (char *)&ackSignal_ok, 32, 0, (SOCKADDR *)&saUdpServ, nSize);
-
+				std::cout << "PC <- PC: 应答(succed)" << std::endl;
 				switch_on = 0; //状态转移
 				break;
 			case 7: //应答信号---错误
 				sendto(sockListener, (char *)&ackSignal_error, 32, 0, (SOCKADDR *)&saUdpServ, nSize);
-
+				std::cout << "PC <- PC: 应答(error)" << std::endl;
 				switch_on = 0; //状态转移
 				break;
 			default:

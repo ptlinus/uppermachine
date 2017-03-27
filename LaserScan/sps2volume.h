@@ -149,6 +149,7 @@ public:
 	}
 	void filter(spMap &out, sensorPoint *spLine, int num)
 	{
+		
 		for (int i = 0; i < hist.size(); ++i)
 		{
 			hist[i].reset();

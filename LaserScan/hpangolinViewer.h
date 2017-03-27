@@ -17,7 +17,7 @@ HANDLE hMutex5;
 
 float g_color = 0.9;
 
-int saveImage_flag = -1;  //1-启动设备  2-停止设备
+int saveImage_flag = -1;  //1-启动设备  0-停止设备
 bool saveScanFile_flag = 0;
 bool set_pwm = 0;
 int m_HAngleResolution = 500;
@@ -201,27 +201,28 @@ public:
 			}
 			if (settings_showSensor.Get())
 			{
-				glPointSize(2.0f);
 				glBegin(GL_POINTS);
-				glColor3f(0.9, 0.9, 0.9);
-				WaitForSingleObject(hMutex2, INFINITE);
-		/*		for (int k = 0; k < vpts.size(); k+=3)
-				{
-					glVertex3f(vpts[k], vpts[k + 1], vpts[k + 2]);
-				}*/
-				glPointSize(5.0f);
-				glColor3f(0.9, 0, 0);
-				for (int k = 0; k < vpts1.size(); k += 3)
-				{
-					glVertex3f(vpts1[k], vpts1[k + 1], vpts1[k + 2]);
-				}
-			/*	glPointSize(10.0f);
+				glPointSize(10.0f);
 				glColor3f(0.9, 0.9, 0);
+				WaitForSingleObject(hMutex2, INFINITE);
 				for (int k = 0; k < vpts2.size(); k += 3)
 				{
 					glVertex3f(vpts2[k], vpts2[k + 1], vpts2[k + 2]);
 				}
-*/
+
+				glPointSize(2.0f);
+				glColor3f(0.9, 0.9, 0.9);
+				for (int k = 0; k < vpts.size(); k+=3)
+				{
+					glVertex3f(vpts[k], vpts[k + 1], vpts[k + 2]);
+				}
+				/*glPointSize(5.0f);
+				glColor3f(0.9, 0, 0);
+				for (int k = 0; k < vpts1.size(); k += 3)
+				{
+					glVertex3f(vpts1[k], vpts1[k + 1], vpts1[k + 2]);
+				}*/
+			
 				ReleaseMutex(hMutex2);
 
 				glEnd();
